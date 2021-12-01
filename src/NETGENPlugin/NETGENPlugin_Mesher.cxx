@@ -41,14 +41,14 @@
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_ControlPnt.hxx>
 #include <SMESH_File.hxx>
-#include <SMESH_Gen_i.hxx>
+#include <SMESH_Gen.hxx>
 #include <SMESH_Mesh.hxx>
 #include <SMESH_MesherHelper.hxx>
 #include <SMESH_subMesh.hxx>
 #include <StdMeshers_QuadToTriaAdaptor.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
 
-#include <SALOMEDS_Tool.hxx>
+// #include <SALOMEDS_Tool.hxx>
 
 #include <utilities.h>
 
@@ -659,6 +659,7 @@ void NETGENPlugin_Mesher::SetParameters(const NETGENPlugin_Hypothesis* hyp)
     // const char*
     mparams.meshsizefilename= hyp->GetMeshSizeFile().empty() ? 0 : hyp->GetMeshSizeFile().c_str();
 #endif
+    /*
     const NETGENPlugin_Hypothesis::TLocalSize& localSizes = hyp->GetLocalSizesAndEntries();
     if ( !localSizes.empty() )
     {
@@ -680,6 +681,7 @@ void NETGENPlugin_Mesher::SetParameters(const NETGENPlugin_Hypothesis* hyp)
         setLocalSize(S, val);
       }
     }
+    */
   }
 
 #ifdef NETGEN_V6
@@ -4554,7 +4556,8 @@ void NETGENPlugin_NetgenLibWrapper::CalcLocalH( netgen::Mesh * ngMesh )
 
 std::string NETGENPlugin_NetgenLibWrapper::getOutputFileName()
 {
-  std::string aTmpDir = SALOMEDS_Tool::GetTmpDir();
+  // std::string aTmpDir = SALOMEDS_Tool::GetTmpDir();
+  std::string aTmpDir = "/tmp";
 
   TCollection_AsciiString aGenericName = aTmpDir.c_str();
   aGenericName += "NETGEN_";
@@ -4598,6 +4601,7 @@ void NETGENPlugin_NetgenLibWrapper::RemoveTmpFiles()
 
 void NETGENPlugin_NetgenLibWrapper::removeOutputFile()
 {
+  /*
   if ( !_outputFileName.empty() )
   {
     if ( _ngcout )
@@ -4615,4 +4619,5 @@ void NETGENPlugin_NetgenLibWrapper::removeOutputFile()
 
     SALOMEDS_Tool::RemoveTemporaryFiles( tmpDir.c_str(), aFiles, true );
   }
+  */
 }
