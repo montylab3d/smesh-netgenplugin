@@ -63,6 +63,7 @@
 #include <NCollection_Map.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Standard_ErrorHandler.hxx>
+#include <Standard_Version.hxx>
 #include <Standard_ProgramError.hxx>
 #include <TColStd_MapOfInteger.hxx>
 #include <TopExp.hxx>
@@ -875,12 +876,12 @@ void NETGENPlugin_Mesher::SetLocalSizeForChordalError( netgen::OCCGeometry& occg
       {
         Standard_Integer n1,n2,n3;
         triangulation->Triangles()(i).Get( n1,n2,n3 );
-        p [0] = triangulation->Nodes()(n1).Transformed(loc).XYZ();
-        p [1] = triangulation->Nodes()(n2).Transformed(loc).XYZ();
-        p [2] = triangulation->Nodes()(n3).Transformed(loc).XYZ();
-        uv[0] = triangulation->UVNodes()(n1).XY();
-        uv[1] = triangulation->UVNodes()(n2).XY();
-        uv[2] = triangulation->UVNodes()(n3).XY();
+        p [0] = triangulation->Node(n1).Transformed(loc).XYZ();
+        p [1] = triangulation->Node(n2).Transformed(loc).XYZ();
+        p [2] = triangulation->Node(n3).Transformed(loc).XYZ();
+        uv[0] = triangulation->UVNode(n1).XY();
+        uv[1] = triangulation->UVNode(n2).XY();
+        uv[2] = triangulation->UVNode(n3).XY();
         surfProp.SetParameters( uv[0].X(), uv[0].Y() );
         if ( !surfProp.IsCurvatureDefined() )
           break;
@@ -1038,7 +1039,13 @@ double NETGENPlugin_Mesher::GetDefaultMinSize(const TopoDS_Shape& geom,
       BRep_Tool::Triangulation ( TopoDS::Face( fExp.Current() ), loc);
     if ( triangulation.IsNull() ) continue;
     const double fTol = BRep_Tool::Tolerance( TopoDS::Face( fExp.Current() ));
+#if OCC_VERSION_HEX < 0x070600
     const TColgp_Array1OfPnt&   points = triangulation->Nodes();
+#else
+    auto points = [&triangulation](Standard_Integer index) {
+        return triangulation->Node(index);
+    };
+#endif
     const Poly_Array1OfTriangle& trias = triangulation->Triangles();
     for ( int iT = trias.Lower(); iT <= trias.Upper(); ++iT )
     {
