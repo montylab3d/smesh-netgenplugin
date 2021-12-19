@@ -709,7 +709,7 @@ bool NETGENPlugin_Remesher_2D::Compute(SMESH_Mesh&         theMesh,
   }
   else
   {
-    Ng_STL_MakeEdges( ngStlGeo, ngLib.ngMesh(), &ngParams );
+    Ng_STL_MakeEdges( ngStlGeo, ngMesh, &ngParams );
   }
 
   netgen::mparam = savedParams;
@@ -728,7 +728,7 @@ bool NETGENPlugin_Remesher_2D::Compute(SMESH_Mesh&         theMesh,
   // meshing
   try
   {
-    ng_res = Ng_STL_GenerateSurfaceMesh( ngStlGeo, ngLib.ngMesh(), &ngParams );
+    ng_res = Ng_STL_GenerateSurfaceMesh( ngStlGeo, ngMesh, &ngParams );
   }
   catch (netgen::NgException & ex)
   {
