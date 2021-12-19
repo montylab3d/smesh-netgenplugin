@@ -43,6 +43,7 @@
 #include <Precision.hxx>
 #include <Standard_ErrorHandler.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp.hxx>
 
 #include <utilities.h>
 
@@ -236,10 +237,11 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
   NETGENPlugin_NetgenLibWrapper ngLib;
   ngLib._isComputeOk = false;
 
-  netgen::Mesh   ngMeshNoLocSize;
-  netgen::Mesh * ngMeshes[2] = { (netgen::Mesh*) ngLib._ngMesh,  & ngMeshNoLocSize };
-  netgen::OCCGeometry occgeoComm;
-
+  shared_ptr<netgen::Mesh> ngMeshNoLocSize;
+  ngMeshNoLocSize.reset((netgen::Mesh *)Ng_NewMesh());
+  shared_ptr<netgen::Mesh> ngMeshes[2] = { ngLib._ngMesh,  ngMeshNoLocSize };
+  shared_ptr<netgen::OCCGeometry> occgeoComm_shared(new netgen::OCCGeometry());
+  netgen::OCCGeometry& occgeoComm = *occgeoComm_shared;
   // min / max sizes are set as follows:
   // if ( _hypParameters )
   //    min and max are defined by the user
@@ -428,7 +430,8 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
     }
 
     // prepare occgeom
-    netgen::OCCGeometry occgeom;
+    std::shared_ptr<netgen::OCCGeometry> occgeom_shared(new netgen::OCCGeometry());
+    netgen::OCCGeometry &occgeom = *occgeom_shared;
     occgeom.shape = F;
     occgeom.fmap.Add( F );
     occgeom.CalcBoundingBox();
@@ -453,7 +456,7 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
       //bool isMESHCONST_ANALYSE = false;
       InitComputeError();
 
-      netgen::Mesh * ngMesh = ngMeshes[ iLoop ];
+      shared_ptr<netgen::Mesh> ngMesh = ngMeshes[ iLoop ];
       ngMesh->DeleteMesh();
 
       if ( iLoop == NO_LOC_SIZE )
@@ -492,7 +495,7 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
       try {
         OCC_CATCH_SIGNALS;
 
-        err = ngLib.GenerateMesh(occgeom, startWith, endWith, ngMesh);
+        err = ngLib.GenerateMesh(occgeom_shared, startWith, endWith, ngMesh);
 
         if ( netgen::multithread.terminate )
           return false;

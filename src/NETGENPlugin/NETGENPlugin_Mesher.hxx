@@ -85,16 +85,16 @@ struct NETGENPlugin_ngMeshInfo
 struct NETGENPLUGIN_EXPORT NETGENPlugin_NetgenLibWrapper
 {
   bool           _isComputeOk;
-  netgen::Mesh * _ngMesh;
+  std::shared_ptr<netgen::Mesh> _ngMesh;
 
   NETGENPlugin_NetgenLibWrapper();
   ~NETGENPlugin_NetgenLibWrapper();
-  void setMesh( nglib::Ng_Mesh* mesh );
-  nglib::Ng_Mesh* ngMesh() { return (nglib::Ng_Mesh*)(void*)_ngMesh; }
+  void setMesh( std::shared_ptr<netgen::Mesh>& mesh );
 
-  static int GenerateMesh(netgen::OCCGeometry& occgeo, int startWith, int endWith,
-                          netgen::Mesh* & ngMesh);
-  int GenerateMesh(netgen::OCCGeometry& occgeo, int startWith, int endWith )
+  static int GenerateMesh(std::shared_ptr<netgen::OCCGeometry>& occgeo,
+                          int startWith, int endWith,
+                          std::shared_ptr<netgen::Mesh>& ngMesh);
+  int GenerateMesh(std::shared_ptr<netgen::OCCGeometry>& occgeo, int startWith, int endWith )
   {
     return GenerateMesh( occgeo, startWith, endWith, _ngMesh );
   }
@@ -216,8 +216,7 @@ class NETGENPLUGIN_EXPORT NETGENPlugin_Mesher
   int                  _fineness;
   bool                 _isViscousLayers2D;
   double               _chordalError;
-  netgen::Mesh*        _ngMesh;
-  netgen::OCCGeometry* _occgeom;
+  std::shared_ptr<netgen::Mesh> _ngMesh;
 
   int                  _curShapeIndex;
   volatile int         _progressTic;

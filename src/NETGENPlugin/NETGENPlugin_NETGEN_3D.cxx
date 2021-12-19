@@ -210,7 +210,8 @@ bool NETGENPlugin_NETGEN_3D::Compute(SMESH_Mesh&         aMesh,
   int Netgen_triangle[3];
 
   NETGENPlugin_NetgenLibWrapper ngLib;
-  Ng_Mesh * Netgen_mesh = (Ng_Mesh*)ngLib._ngMesh;
+  std::shared_ptr<netgen::Mesh> Netgen_mesh_shared = ngLib._ngMesh;
+  nglib::Ng_Mesh *Netgen_mesh = (nglib::Ng_Mesh *)Netgen_mesh_shared.get();
 
   // vector of nodes in which node index == netgen ID
   vector< const SMDS_MeshNode* > nodeVec;
@@ -437,8 +438,8 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
 {
   netgen::multithread.terminate = 0;
 
-  netgen::Mesh* ngMesh = ngLib._ngMesh;
-  Ng_Mesh* Netgen_mesh = ngLib.ngMesh();
+  std::shared_ptr<netgen::Mesh> ngMesh = ngLib._ngMesh;
+  Ng_Mesh* Netgen_mesh = (Ng_Mesh *)ngMesh.get();
   int Netgen_NbOfNodes = Ng_GetNP( Netgen_mesh );
 
   int startWith = netgen::MESHCONST_MESHVOLUME;
@@ -446,7 +447,8 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
   int err = 1;
 
   NETGENPlugin_Mesher aMesher( &aMesh, helper.GetSubShape(), /*isVolume=*/true );
-  netgen::OCCGeometry occgeo;
+  std::shared_ptr<netgen::OCCGeometry> occgeo_shared(new netgen::OCCGeometry());
+  netgen::OCCGeometry& occgeo = *occgeo_shared;
 
   if ( _hypParameters )
   {
@@ -498,8 +500,8 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
   {
     OCC_CATCH_SIGNALS;
 
-    ngLib.CalcLocalH(ngMesh);
-    err = ngLib.GenerateMesh(occgeo, startWith, endWith);
+    ngLib.CalcLocalH(ngMesh.get());
+    err = ngLib.GenerateMesh(occgeo_shared, startWith, endWith);
 
     if(netgen::multithread.terminate)
       return false;
@@ -610,7 +612,8 @@ bool NETGENPlugin_NETGEN_3D::Compute(SMESH_Mesh&         aMesh,
   int Netgen_triangle[3];
 
   NETGENPlugin_NetgenLibWrapper ngLib;
-  Ng_Mesh * Netgen_mesh = ngLib.ngMesh();
+  std::shared_ptr<netgen::Mesh> ngMesh = ngLib._ngMesh;
+  Ng_Mesh* Netgen_mesh = (Ng_Mesh *)ngMesh.get();
 
   SMESH_ProxyMesh::Ptr proxyMesh( new SMESH_ProxyMesh( aMesh ));
   if ( aMesh.NbQuadrangles() > 0 )
