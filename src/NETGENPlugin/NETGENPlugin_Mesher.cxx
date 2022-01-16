@@ -922,26 +922,19 @@ void NETGENPlugin_Mesher::SetLocalSizeForChordalError( netgen::OCCGeometry& occg
  */
 //================================================================================
 
-void NETGENPlugin_Mesher::PrepareOCCgeometry(netgen::OCCGeometry&     occgeo,
-                                             const TopoDS_Shape&      shape,
-                                             SMESH_Mesh&              mesh,
-                                             list< SMESH_subMesh* > * meshedSM,
-                                             NETGENPlugin_Internals*  intern)
+std::shared_ptr<netgen::OCCGeometry>
+NETGENPlugin_Mesher::PrepareOCCgeometry(const TopoDS_Shape&      shape,
+                                        SMESH_Mesh&              mesh,
+                                        list< SMESH_subMesh* > * meshedSM,
+                                        NETGENPlugin_Internals*  intern)
 {
   updateTriangulation( shape );
 
-  Bnd_Box bb;
-  BRepBndLib::Add (shape, bb);
-  double x1,y1,z1,x2,y2,z2;
-  bb.Get (x1,y1,z1,x2,y2,z2);
-  netgen::Point<3> p1 = netgen::Point<3> (x1,y1,z1);
-  netgen::Point<3> p2 = netgen::Point<3> (x2,y2,z2);
-  occgeo.boundingbox = netgen::Box<3> (p1,p2);
-
-  occgeo.shape = shape;
-  occgeo.changed = 1;
-
-  // fill maps of shapes of occgeo with not yet meshed subshapes
+  // collect not yet meshed subshapes from Shape into a CompositeShape
+  // we'll compute further.  The subshapes exist in Mesh.
+  BRep_Builder b;
+  TopoDS_Compound collect;
+  b.MakeCompound(collect);
 
   // get root submeshes
   list< SMESH_subMesh* > rootSM;
@@ -953,8 +946,6 @@ void NETGENPlugin_Mesher::PrepareOCCgeometry(netgen::OCCGeometry&     occgeo,
     for ( TopoDS_Iterator it( shape ); it.More(); it.Next() )
       rootSM.push_back( mesh.GetSubMesh( it.Value() ));
   }
-
-  int totNbFaces = 0;
 
   // add subshapes of empty submeshes
   list< SMESH_subMesh* >::iterator rootIt = rootSM.begin(), rootEnd = rootSM.end();
@@ -969,9 +960,8 @@ void NETGENPlugin_Mesher::PrepareOCCgeometry(netgen::OCCGeometry&     occgeo,
     {
       SMESH_subMesh*  sm = smIt->next();
       TopoDS_Shape shape = sm->GetSubShape();
-      totNbFaces += ( shape.ShapeType() == TopAbs_FACE );
       if ( intern && intern->isShapeToPrecompute( shape ))
-        continue;
+        continue; // later/elsewhere
       if ( !meshedSM || sm->IsEmpty() )
       {
         if ( shape.ShapeType() != TopAbs_VERTEX )
@@ -979,27 +969,47 @@ void NETGENPlugin_Mesher::PrepareOCCgeometry(netgen::OCCGeometry&     occgeo,
         if ( shape.Orientation() >= TopAbs_INTERNAL )
           shape.Orientation( TopAbs_FORWARD ); // issue 0020676
         switch ( shape.ShapeType() ) {
-        case TopAbs_FACE  : occgeo.fmap.Add( shape ); break;
-        case TopAbs_EDGE  : occgeo.emap.Add( shape ); break;
-        case TopAbs_VERTEX: occgeo.vmap.Add( shape ); break;
-        case TopAbs_SOLID :occgeo.somap.Add( shape ); break;
+        case TopAbs_FACE  :
+        case TopAbs_EDGE  :
+        case TopAbs_VERTEX:
+        case TopAbs_SOLID :
+          // submesh this Shape, add to subshape collection
+          b.Add(collect, shape);
         default:;
         }
       }
       // collect submeshes of meshed shapes
       else if (meshedSM)
       {
+        // Add to list of 'already completed subshapes'
         const int dim = SMESH_Gen::GetShapeDim( shape );
         meshedSM[ dim ].push_back( sm );
       }
     }
   }
-  occgeo.facemeshstatus.SetSize (totNbFaces);
-  occgeo.facemeshstatus = 0;
-  occgeo.face_maxh_modified.SetSize(totNbFaces);
-  occgeo.face_maxh_modified = 0;
-  occgeo.face_maxh.SetSize(totNbFaces);
-  occgeo.face_maxh = netgen::mparam.maxh;
+
+  // The OCCGeometry we want has the complete passed in shape for
+  // reference, but maps only the list of unmeshed subshapes for
+  // computation.
+
+  // Bounding box from passed shape, not the added
+  // edges/faces
+  Bnd_Box bb;
+  BRepBndLib::Add (shape, bb);
+  double x1,y1,z1,x2,y2,z2;
+  bb.Get (x1,y1,z1,x2,y2,z2);
+  netgen::Point<3> p1 = netgen::Point<3> (x1,y1,z1);
+  netgen::Point<3> p2 = netgen::Point<3> (x2,y2,z2);
+
+  std::shared_ptr<netgen::OCCGeometry> occgeo (new netgen::OCCGeometry(collect));
+  occgeo->shape = shape;
+  // Netgen is in flux, and right now both exist (base and subclass)
+  // This will likely get fixed sometime soon; remove the redundant one when it does
+  occgeo->boundingbox = netgen::Box<3> (p1,p2);
+  occgeo->bounding_box = netgen::Box<3> (p1,p2);
+
+  occgeo->face_maxh = netgen::mparam.maxh;
+  return occgeo;
 }
 
 //================================================================================
@@ -1408,16 +1418,24 @@ bool NETGENPlugin_Mesher::FillNgMesh(netgen::OCCGeometry&           occgeom,
       {
         ngMesh.AddFaceDescriptor( netgen::FaceDescriptor( faceNgID, solidID1, solidID2, 0 ));
       }
-      // if second oreder is required, even already meshed faces must be passed to NETGEN
+
+      // when second oreder is required, already meshed faces must also
+      // be present in the geometry computation maps.
+      // Add to the list of meshed faces to be added to the geometry.
+
       int fID = occgeom.fmap.Add( geomFace );
       if ( occgeom.facemeshstatus.Size() < fID ) occgeom.facemeshstatus.SetSize( fID );
       occgeom.facemeshstatus[ fID-1 ] = netgen::FACE_MESHED_OK;
-      while ( fID < faceNgID ) // geomFace is already in occgeom.fmap, add a copy
+
+      while ( fID < faceNgID ) // geomFace already in occgeom.fmap,
+                               // make each preexisting occurrence an
+                               // independent copy.
       {
         fID = occgeom.fmap.Add( BRepBuilderAPI_Copy( geomFace, /*copyGeom=*/false ));
         if ( occgeom.facemeshstatus.Size() < fID ) occgeom.facemeshstatus.SetSize( fID );
         occgeom.facemeshstatus[ fID-1 ] = netgen::FACE_MESHED_OK;
       }
+
       // Problem with the second order in a quadrangular mesh remains.
       // 1) All quadrangles generated by NETGEN are moved to an inexistent face
       //    by FillSMesh() (find "AddFaceDescriptor")
@@ -1549,6 +1567,10 @@ bool NETGENPlugin_Mesher::FillNgMesh(netgen::OCCGeometry&           occgeom,
     default:;
     } // switch
   } // loop on submeshes
+
+  // We likely added faces to the low-level OCCGeometry;
+  // The base class needs to be updated
+  occgeom.ReconcileBase();
 
   // fill nodeVec
   nodeVec.resize( ngMesh.GetNP() + 1 );
@@ -2872,11 +2894,10 @@ bool NETGENPlugin_Mesher::Compute()
   // Prepare OCC geometry
   // -------------------------
 
-  std::shared_ptr<netgen::OCCGeometry> occgeo_share (new netgen::OCCGeometry());
-  netgen::OCCGeometry& occgeo = *occgeo_share;
-  list< SMESH_subMesh* > meshedSM[3]; // for 0-2 dimensions
   NETGENPlugin_Internals internals( *_mesh, _shape, _isVolume );
-  PrepareOCCgeometry( occgeo, _shape, *_mesh, meshedSM, &internals );
+  list< SMESH_subMesh* > meshedSM[3]; // for 0-2 dimensions
+  std::shared_ptr<netgen::OCCGeometry> occgeo_share = PrepareOCCgeometry( _shape, *_mesh, meshedSM, &internals );
+  netgen::OCCGeometry& occgeo = *occgeo_share;
 
   _totalTime = edgeFaceMeshingTime;
   if ( _optimize )
@@ -2989,11 +3010,13 @@ bool NETGENPlugin_Mesher::Compute()
     if ( !err && internals.hasInternalEdges() )
     {
       // load internal shapes into OCCGeometry
+      TopoDS_Compound cs;
+      internals.getInternalEdges( cs, meshedSM );
       std::shared_ptr<netgen::Mesh> tmpNgMesh (nullptr, &ngMesh_HackDeleter);
-      std::shared_ptr<netgen::OCCGeometry> intOccgeo_share ( new netgen::OCCGeometry());
+      std::shared_ptr<netgen::OCCGeometry> intOccgeo_share ( new netgen::OCCGeometry(cs));
       netgen::OCCGeometry& intOccgeo = *intOccgeo_share;
-      internals.getInternalEdges( intOccgeo.fmap, intOccgeo.emap, intOccgeo.vmap, meshedSM );
       intOccgeo.boundingbox = occgeo.boundingbox;
+      intOccgeo.bounding_box = occgeo.bounding_box;
       intOccgeo.shape = occgeo.shape;
       intOccgeo.face_maxh.SetSize(intOccgeo.fmap.Extent());
       intOccgeo.face_maxh = netgen::mparam.maxh;
@@ -3049,7 +3072,7 @@ bool NETGENPlugin_Mesher::Compute()
       {
         OCC_CATCH_SIGNALS;
 
-        err = ngLib.GenerateMesh(occgeo_share, startWith, endWith);
+        err = ngLib.GenerateMesh(occgeo_share, startWith, endWith); // ********
 
         if ( netgen::multithread.terminate )
           return false;
@@ -3491,10 +3514,9 @@ bool NETGENPlugin_Mesher::Evaluate(MapShapeNbElems& aResMap)
   // -------------------------
   // Prepare OCC geometry
   // -------------------------
-  std::shared_ptr<netgen::OCCGeometry> occgeo_share(new netgen::OCCGeometry());
-  netgen::OCCGeometry& occgeo = *occgeo_share;
   NETGENPlugin_Internals internals( *_mesh, _shape, _isVolume );
-  PrepareOCCgeometry( occgeo, _shape, *_mesh, 0, &internals );
+  std::shared_ptr<netgen::OCCGeometry> occgeo_share = PrepareOCCgeometry( _shape, *_mesh, 0, &internals );
+  netgen::OCCGeometry& occgeo = *occgeo_share;
 
   bool tooManyElems = false;
   const int hugeNb = std::numeric_limits<int>::max() / 100;
@@ -4223,12 +4245,14 @@ void NETGENPlugin_Internals::findBorderElements( TIDSortedElemSet & borderElems 
  * \brief put internal shapes in maps and fill in submeshes to precompute
  */
 //================================================================================
-
-void NETGENPlugin_Internals::getInternalEdges( TopTools_IndexedMapOfShape& fmap,
-                                               TopTools_IndexedMapOfShape& emap,
-                                               TopTools_IndexedMapOfShape& vmap,
+void NETGENPlugin_Internals::getInternalEdges( TopoDS_Compound &compound,
+                                               //TopTools_IndexedMapOfShape& fmap,
+                                               //TopTools_IndexedMapOfShape& emap,
+                                               //TopTools_IndexedMapOfShape& vmap,
                                                list< SMESH_subMesh* > smToPrecompute[])
 {
+  BRep_Builder b;
+  b.MakeCompound(compound);
   if ( !hasInternalEdges() ) return;
   map<int,int>::const_iterator ev_face = _e2face.begin();
   for ( ; ev_face != _e2face.end(); ++ev_face )
@@ -4236,8 +4260,10 @@ void NETGENPlugin_Internals::getInternalEdges( TopTools_IndexedMapOfShape& fmap,
     const TopoDS_Shape& ev   = _mesh.GetMeshDS()->IndexToShape( ev_face->first );
     const TopoDS_Shape& face = _mesh.GetMeshDS()->IndexToShape( ev_face->second );
 
-    ( ev.ShapeType() == TopAbs_EDGE ? emap : vmap ).Add( ev );
-    fmap.Add( face );
+    b.Add(compound,ev);
+    b.Add(compound,face);
+    //( ev.ShapeType() == TopAbs_EDGE ? emap : vmap ).Add( ev );
+    //fmap.Add( face );
     //cout<<"INTERNAL EDGE or VERTEX "<<ev_face->first<<" on face "<<ev_face->second<<endl;
 
     smToPrecompute[ MeshDim_1D ].push_back( _mesh.GetSubMeshContaining( ev_face->first ));
@@ -4250,11 +4276,14 @@ void NETGENPlugin_Internals::getInternalEdges( TopTools_IndexedMapOfShape& fmap,
  */
 //================================================================================
 
-void NETGENPlugin_Internals::getInternalFaces( TopTools_IndexedMapOfShape& fmap,
-                                               TopTools_IndexedMapOfShape& emap,
+void NETGENPlugin_Internals::getInternalFaces( TopoDS_Compound &compound,
+                                               //TopTools_IndexedMapOfShape& fmap,
+                                               //TopTools_IndexedMapOfShape& emap,
                                                list< SMESH_subMesh* >&     intFaceSM,
                                                list< SMESH_subMesh* >&     boundarySM)
 {
+  BRep_Builder b;
+  b.MakeCompound(compound);
   if ( !hasInternalFaces() ) return;
 
   // <fmap> and <emap> are for not yet meshed shapes
@@ -4290,8 +4319,10 @@ void NETGENPlugin_Internals::getInternalFaces( TopTools_IndexedMapOfShape& fmap,
       {
         // not yet meshed
         switch ( s.ShapeType() ) {
-        case TopAbs_FACE: fmap.Add ( s ); break;
-        case TopAbs_EDGE: emap.Add ( s ); break;
+        case TopAbs_FACE:
+        case TopAbs_EDGE:
+          b.Add(compound,s);
+          break;
         default:;
         }
       }

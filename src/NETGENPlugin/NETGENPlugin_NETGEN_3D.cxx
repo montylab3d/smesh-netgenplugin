@@ -447,12 +447,12 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
   int err = 1;
 
   NETGENPlugin_Mesher aMesher( &aMesh, helper.GetSubShape(), /*isVolume=*/true );
-  std::shared_ptr<netgen::OCCGeometry> occgeo_shared(new netgen::OCCGeometry());
-  netgen::OCCGeometry& occgeo = *occgeo_shared;
+  std::shared_ptr<netgen::OCCGeometry> occgeo;
 
   if ( _hypParameters )
   {
     aMesher.SetParameters( _hypParameters );
+    occgeo.reset(new netgen::OCCGeometry());
 
     if ( !_hypParameters->GetLocalSizesAndEntries().empty() ||
          !_hypParameters->GetMeshSizeFile().empty() )
@@ -463,7 +463,7 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
         ngMesh->GetBox( pmin, pmax, 0 );
         ngMesh->SetLocalH( pmin, pmax, _hypParameters->GetGrowthRate() );
       }
-      aMesher.SetLocalSize( occgeo, *ngMesh );
+      aMesher.SetLocalSize( *occgeo, *ngMesh );
 
       try {
         ngMesh->LoadLocalMeshSize( netgen::mparam.meshsizefilename );
@@ -477,16 +477,18 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
   else if ( _hypMaxElementVolume )
   {
     netgen::mparam.maxh = pow( 72, 1/6. ) * pow( _maxElementVolume, 1/3. );
+    occgeo.reset(new netgen::OCCGeometry());
     // limitVolumeSize( ngMesh, netgen::mparam.maxh ); // result is unpredictable
   }
   else if ( aMesh.HasShapeToMesh() )
   {
-    aMesher.PrepareOCCgeometry( occgeo, helper.GetSubShape(), aMesh );
-    netgen::mparam.maxh = occgeo.GetBoundingBox().Diam()/2;
+    occgeo = aMesher.PrepareOCCgeometry( helper.GetSubShape(), aMesh );
+    netgen::mparam.maxh = occgeo->GetBoundingBox().Diam()/2;
   }
   else
   {
     netgen::Point3d pmin, pmax;
+    occgeo.reset(new netgen::OCCGeometry());
     ngMesh->GetBox (pmin, pmax);
     netgen::mparam.maxh = Dist(pmin, pmax)/2;
   }
@@ -501,7 +503,7 @@ bool NETGENPlugin_NETGEN_3D::compute(SMESH_Mesh&                     aMesh,
     OCC_CATCH_SIGNALS;
 
     ngLib.CalcLocalH(ngMesh.get());
-    err = ngLib.GenerateMesh(occgeo_shared, startWith, endWith);
+    err = ngLib.GenerateMesh(occgeo, startWith, endWith);
 
     if(netgen::multithread.terminate)
       return false;

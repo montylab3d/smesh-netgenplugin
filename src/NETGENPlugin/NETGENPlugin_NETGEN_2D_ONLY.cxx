@@ -47,6 +47,10 @@
 
 #include <utilities.h>
 
+#include <BRep_Builder.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
+
 #include <list>
 #include <vector>
 #include <limits>
@@ -62,7 +66,7 @@ namespace nglib {
 #endif
 #include <occgeom.hpp>
 #include <meshing.hpp>
-//#include <meshtype.hpp>
+#include <meshtype.hpp>
 namespace netgen {
   NETGENPLUGIN_DLL_HEADER
   extern MeshingParameters mparam;
@@ -240,8 +244,7 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
   shared_ptr<netgen::Mesh> ngMeshNoLocSize;
   ngMeshNoLocSize.reset((netgen::Mesh *)Ng_NewMesh());
   shared_ptr<netgen::Mesh> ngMeshes[2] = { ngLib._ngMesh,  ngMeshNoLocSize };
-  shared_ptr<netgen::OCCGeometry> occgeoComm_shared(new netgen::OCCGeometry());
-  netgen::OCCGeometry& occgeoComm = *occgeoComm_shared;
+  shared_ptr<netgen::OCCGeometry> occgeoComm_shared;
   // min / max sizes are set as follows:
   // if ( _hypParameters )
   //    min and max are defined by the user
@@ -272,7 +275,8 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
   if ( isCommonLocalSize ) // compute common local size in ngMeshes[0]
   {
     //list< SMESH_subMesh* > meshedSM[4]; --> all sub-shapes are added to occgeoComm
-    aMesher.PrepareOCCgeometry( occgeoComm, aShape, aMesh );//, meshedSM );
+    occgeoComm_shared = aMesher.PrepareOCCgeometry( aShape, aMesh );//, meshedSM );
+    netgen::OCCGeometry& occgeoComm = *occgeoComm_shared;
 
     // local size set at MESHCONST_ANALYSE step depends on
     // minh, face_maxh, grading and curvaturesafety; find minh if not set by the user
@@ -297,8 +301,47 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
 #else
     netgen::OCCSetLocalMeshSize( occgeoComm, *ngMeshes[0] );
 #endif
-    occgeoComm.emap.Clear();
-    occgeoComm.vmap.Clear();
+
+
+    // ARGH XXXXXXX
+    //occgeoComm.emap.Clear();
+    //occgeoComm.vmap.Clear();
+
+    // Need to clear the emap and vmap, but also need to clear the
+    // associated protected vertex and edge entries in the base
+    // geometry class.  There's no way to do that in the evolving
+    // netgen API.  For that reason, we do what we must-- build a new
+    // geometry with everything except the edges and vertices.  This
+    // is the least likely route to breaking completely in the future.
+    {
+      BRep_Builder b;
+      TopoDS_Compound collect;
+      b.MakeCompound(collect);
+
+      // Add shapes
+      for(auto [i,s] : Enumerate(occgeoComm.fmap))
+        b.Add(collect, s);
+      for(auto [i,s] : Enumerate(occgeoComm.somap))
+        b.Add(collect, s);
+      for(auto [i,s] : Enumerate(occgeoComm.shmap))
+        b.Add(collect, s);
+      for(auto [i,s] : Enumerate(occgeoComm.wmap))
+        b.Add(collect, s);
+
+      std::shared_ptr<netgen::OCCGeometry> newgeo (new netgen::OCCGeometry(collect));
+      newgeo->shape = occgeoComm.shape;
+      newgeo->boundingbox = occgeoComm.boundingbox;
+      newgeo->bounding_box = occgeoComm.boundingbox;
+      newgeo->face_maxh = occgeoComm.face_maxh;
+      newgeo->tolerance = occgeoComm.tolerance;
+      newgeo->fixsmalledges = occgeoComm.fixsmalledges;
+      newgeo->fixspotstripfaces = occgeoComm.fixspotstripfaces;
+      newgeo->sewfaces = occgeoComm.sewfaces;
+      newgeo->makesolids = occgeoComm.makesolids;
+      newgeo->splitpartitions = occgeoComm.splitpartitions;
+
+      occgeoComm_shared = newgeo;
+    }
 
     // set local size according to size of existing segments
     TopTools_IndexedMapOfShape edgeMap;
@@ -330,6 +373,10 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
     } catch (NgException & ex) {
       return error( COMPERR_BAD_PARMETERS, ex.What() );
     }
+  }
+  else
+  {
+    occgeoComm_shared.reset(new OCCGeometry());
   }
   netgen::mparam.uselocalh = toOptimize; // restore as it is used at surface optimization
 
@@ -421,7 +468,7 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
         netgen::mparam.maxh = edgeLength;
       }
       if ( netgen::mparam.maxh < DBL_MIN )
-        netgen::mparam.maxh = occgeoComm.GetBoundingBox().Diam();
+        netgen::mparam.maxh = occgeoComm_shared->GetBoundingBox().Diam();
 
       if ( !isCommonLocalSize )
       {
@@ -430,16 +477,16 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
     }
 
     // prepare occgeom
-    std::shared_ptr<netgen::OCCGeometry> occgeom_shared(new netgen::OCCGeometry());
+    std::shared_ptr<netgen::OCCGeometry> occgeom_shared(new netgen::OCCGeometry(F));
     netgen::OCCGeometry &occgeom = *occgeom_shared;
-    occgeom.shape = F;
-    occgeom.fmap.Add( F );
-    occgeom.CalcBoundingBox();
-    occgeom.facemeshstatus.SetSize(1);
-    occgeom.facemeshstatus = 0;
-    occgeom.face_maxh_modified.SetSize(1);
-    occgeom.face_maxh_modified = 0;
-    occgeom.face_maxh.SetSize(1);
+    //occgeom.shape = F;
+    //occgeom.fmap.Add( F );
+    //occgeom.CalcBoundingBox();
+    //occgeom.facemeshstatus.SetSize(1);
+    //occgeom.facemeshstatus = 0;
+    //occgeom.face_maxh_modified.SetSize(1);
+    //occgeom.face_maxh_modified = 0;
+    //occgeom.face_maxh.SetSize(1);
     occgeom.face_maxh = netgen::mparam.maxh;
 
     // -------------------------
@@ -467,7 +514,7 @@ bool NETGENPlugin_NETGEN_2D_ONLY::Compute(SMESH_Mesh&         aMesh,
         bb.Increase (bb.Diam()/10);
         ngMesh->SetLocalH (bb.PMin(), bb.PMax(), mparam.grading);
         aMesher.SetLocalSize( occgeom, *ngMesh );
-        aMesher.SetLocalSizeForChordalError( occgeoComm, *ngMesh );
+        aMesher.SetLocalSizeForChordalError( *occgeoComm_shared, *ngMesh );
         try {
           ngMesh->LoadLocalMeshSize( mparam.meshsizefilename );
         } catch (NgException & ex) {

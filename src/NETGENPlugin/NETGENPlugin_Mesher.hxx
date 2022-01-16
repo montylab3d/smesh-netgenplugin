@@ -36,6 +36,8 @@
 #include <SMESH_Algo.hxx>
 #include <SMESH_ProxyMesh.hxx>
 
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 
 namespace nglib {
@@ -145,11 +147,11 @@ class NETGENPLUGIN_EXPORT NETGENPlugin_Mesher
                      const int *       algoProgressTic,
                      const double *    algoProgress) const;
 
-  static void PrepareOCCgeometry(netgen::OCCGeometry&          occgeom,
-                                 const TopoDS_Shape&           shape,
-                                 SMESH_Mesh&                   mesh,
-                                 std::list< SMESH_subMesh* > * meshedSM=0,
-                                 NETGENPlugin_Internals*       internalShapes=0);
+  static std::shared_ptr<netgen::OCCGeometry>
+  PrepareOCCgeometry(const TopoDS_Shape&           shape,
+                     SMESH_Mesh&                   mesh,
+                     std::list< SMESH_subMesh* > * meshedSM=0,
+                     NETGENPlugin_Internals*       internalShapes=0);
 
   static double GetDefaultMinSize(const TopoDS_Shape& shape,
                                   const double        maxSize);
@@ -275,9 +277,10 @@ public:
   bool hasInternalEdges() const { return !_e2face.empty(); }
   bool isInternalEdge( int id ) const { return _e2face.count( id ); }
   const std::map<int,int>& getEdgesAndVerticesWithFaces() const { return _e2face; }
-  void getInternalEdges( TopTools_IndexedMapOfShape&  fmap,
-                         TopTools_IndexedMapOfShape&  emap,
-                         TopTools_IndexedMapOfShape&  vmap,
+  void getInternalEdges( TopoDS_Compound &compound_out,
+                         //pTools_IndexedMapOfShape&  fmap,
+                         //TopTools_IndexedMapOfShape&  emap,
+                         //TopTools_IndexedMapOfShape&  vmap,
                          std::list< SMESH_subMesh* > smToPrecompute[]);
   // vertices
   bool hasInternalVertexInFace() const { return !_f2v.empty(); }
@@ -289,8 +292,9 @@ public:
   bool isInternalShape( int id ) const { return _intShapes.count( id ); }
   void findBorderElements( std::set< const SMDS_MeshElement*, TIDCompare > & borderElems );
   bool isBorderFace( int faceID ) const { return _borderFaces.count( faceID ); }
-  void getInternalFaces( TopTools_IndexedMapOfShape&  fmap,
-                         TopTools_IndexedMapOfShape&  emap,
+  void getInternalFaces( TopoDS_Compound &compound_out,
+                         //TopTools_IndexedMapOfShape&  fmap,
+                         //TopTools_IndexedMapOfShape&  emap,
                          std::list< SMESH_subMesh* >& facesSM,
                          std::list< SMESH_subMesh* >& boundarySM);
   // vertices
